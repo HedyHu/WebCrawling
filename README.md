@@ -1,3 +1,3 @@
 # WebCrawling
 
-# step1: software installation
+# course notes from chinahadoop - WebCrawling basics
