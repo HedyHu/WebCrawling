@@ -36,3 +36,6 @@ some-package refers to package names in requirements.txt under https://github.co
 * (?<=pattern) sub (?=pattern): two rules find the start and the end of pattern, and substitution happens within the pattern. For details, refer to demo.py
 
 8. XPATH in Domain Operating Model (DOM)
+* "/" refers to children and "//" refers to all the posterity
+* soup = tree.xpath('//td[@class="editor bbsDetailContainer"]//*[self::p or self::span or self::h1]')
+* soup = tree.xpath('//td[@class="editor" or @class="tag"]')
