@@ -10,7 +10,7 @@ some-package refers to package names in requirements.txt under https://github.co
 
 2. Find HTML-a and table
 * The full name for HTML is Hyper Text Markup Language. 
-\<a href=\"\****\"></a\>": "<a" stands for an anchor to locate our interested contents. 
+\<a href=\"\****\"></a\>: "<a" stands for an anchor to locate our interested contents. 
 \<table></table\> defines a table. \<tr></tr\> stands for a line. \<th></th\> refers to the header cells and \<td>/</td\> refers to other regular cells.
 
 3. dom attributes
