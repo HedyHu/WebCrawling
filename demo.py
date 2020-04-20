@@ -11,4 +11,7 @@ print(re.findall("\d{3,}",s2))# "{n,m}": min times versus max times
 print(re.findall("href=\".*\"", s3)) # ".": any character; "*": zero or multiple times
 print(re.findall("href=\"(.*)\"", s3)) # "()": within the pattern only
 
-print(re.findall("[^0-9]+", s2)) #"^" in "[]" means excluding.
+print(re.findall("[^0-9]+", s2)) # "^" in "[]" means excluding.
+print(re.findall('.*?>(.*?)<',s3)) # "?" is not greedy.
+
+print(re.sub("(?<=href=\").*?(?=\")", "https://www.tencent.com", s3))
