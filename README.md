@@ -19,3 +19,16 @@ some-package refers to package names in requirements.txt under https://github.co
 4. Cascading Style Sheet(CSS)
 * CSS can be saved in HTML file under certain elements. Also, it can be stored as ".css" file while HTML triggers the css file.
 <link rel="stylesheet" type="text/css" href="myindex.css">
+
+5. requests, url, headers
+* js and css files may not be saved when request webpage. Then, source page file has to replace "//" to "https://".
+
+6. encoding
+* HTML has "charset" to locate the web page's character coding style. 
+* res.encoding="utf-8" can be used to reset the coding into "utf8". 
+* res.content => "w+b" res.text => "w"
+* hash function can be triggered under hashlib package for md5 encoding. 
+
+7. Parse
+* Regular Expression and LXML (based on DOM tree)
+* re.findall(pattern, string): For details, refer to demo.py
