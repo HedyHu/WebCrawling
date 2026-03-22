@@ -39,3 +39,28 @@ some-package refers to package names in requirements.txt under https://github.co
 * "/" refers to children and "//" refers to all the posterity
 * soup = tree.xpath('//td[@class="editor bbsDetailContainer"]//*[self::p or self::span or self::h1]')
 * soup = tree.xpath('//td[@class="editor" or @class="tag"]')
+## Screen-based PDF OCR workflow
+
+Use `screen_pdf_ocr.py` when the poster or PDF must be processed as an on-screen image rather than as a PDF file.
+
+### What the script does
+* Detects the PDF viewer window by title keyword or a manually supplied screen rectangle.
+* Captures numbered PNG tiles with a 10% overlap to avoid missing rows between scrolls.
+* Waits 1 second after each scroll so the viewer can re-render sharp text.
+* Runs EasyOCR over each tile and keeps rows matching the pattern `[Category Name] [ID] [Word Count]`.
+* Reconstructs parent/child hierarchy from OCR indentation (`x_left`) and exports a structured CSV.
+* Flags any category where the sum of direct children is larger than the parent total.
+
+### Example
+```bash
+python screen_pdf_ocr.py \
+  --viewer-title Acrobat \
+  --viewer-title PDF \
+  --tiles-dir output/tiles \
+  --csv output/liwc_rows.csv
+```
+
+### Suggested dependencies
+```bash
+pip install pyautogui pillow easyocr pygetwindow numpy
+```
