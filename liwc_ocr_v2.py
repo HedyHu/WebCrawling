@@ -369,7 +369,21 @@ def ocr_tile_paddle_api(
     }
 
     try:
-        resp = _requests.post(api_url, json=payload, headers=headers, timeout=60)
+        # Retry up to 3 times with increasing timeout
+        resp = None
+        for _attempt in range(3):
+            try:
+                resp = _requests.post(
+                    api_url, json=payload, headers=headers,
+                    timeout=120 + _attempt * 60   # 120s, 180s, 240s
+                )
+                break
+            except Exception as _retry_exc:
+                print(f"    WARNING: API attempt {_attempt+1}/3 failed: {_retry_exc}")
+                if _attempt == 2:
+                    return [], []
+        if resp is None:
+            return [], []
         resp.raise_for_status()
     except Exception as e:
         print(f"    WARNING: Paddle API call failed: {e}")
@@ -386,6 +400,14 @@ def ocr_tile_paddle_api(
             boxes   = pruned.get("boxes", [])
             raw_texts.extend(texts)   # keep original strings for debug
 
+            # One-time debug: print all available keys and first box entry
+            if not raw_texts and texts:
+                print(f"    [API DEBUG] pruned keys: {list(pruned.keys())}")
+                if boxes:
+                    print(f"    [API DEBUG] boxes[0] sample: {boxes[0]}")
+                else:
+                    print(f"    [API DEBUG] boxes is empty — no position data")
+
             for idx, raw_text in enumerate(texts):
                 text = normalise(str(raw_text))
                 if not text:
@@ -393,14 +415,26 @@ def ocr_tile_paddle_api(
                 # No confidence filter here — done after wildcard merging
                 conf = float(scores[idx]) if idx < len(scores) else 0.0
 
-                if idx < len(boxes):
+                if idx < len(boxes) and boxes[idx]:
                     pts = boxes[idx]
-                    xs = [pts[i]   for i in range(0, len(pts), 2)]
-                    ys = [pts[i+1] for i in range(0, len(pts)-1, 2)]
+                    # Handle both formats:
+                    # Nested: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+                    # Flat:   [x1,y1,x2,y2,x3,y3,x4,y4]
+                    if isinstance(pts[0], (list, tuple)):
+                        xs = [float(pt[0]) for pt in pts]
+                        ys = [float(pt[1]) for pt in pts]
+                    else:
+                        xs = [float(pts[i])   for i in range(0, len(pts), 2)]
+                        ys = [float(pts[i+1]) for i in range(0, len(pts)-1, 2)]
                     x_c = sum(xs) / len(xs) if xs else 0.0
                     y_c = sum(ys) / len(ys) if ys else 0.0
                 else:
-                    x_c, y_c = 0.0, 0.0
+                    # No box info from API — use token order as y surrogate.
+                    # Tokens are returned top-to-bottom, so idx * estimated_row_height
+                    # gives a rough y position. We use a large value (9999) so these
+                    # tokens are never mistakenly classified as header-zone tokens.
+                    x_c = 0.0
+                    y_c = 9999.0
 
                 tokens.append((text, conf, x_c, y_c))
     except Exception as e:
@@ -471,80 +505,18 @@ def ocr_tile(
 
     # Debug logging for strip 1 (or any labelled tile)
     if debug_label:
-        print(f"    [{debug_label}] raw API tokens: {len(raw_texts)} → "
+        print(f"    [{debug_label}] raw API tokens: {len(raw_texts)} -> "
               f"after merge: {len(tokens)}")
         print(f"    [{debug_label}] raw sample: {raw_texts[:15]}")
+        # Print first few tokens with y coords to debug header zone issue
+        for _t, _c, _x, _y in tokens[:8]:
+            print(f"      y={_y:.1f}  x={_x:.1f}  '{_t}'")
 
     # Apply confidence filter here (after merge)
     tokens = [(t, c, x, y) for t, c, x, y in tokens if c >= min_confidence]
 
     return tokens
 
-
-def process_block(
-    block_idx: int,
-    x_left: float,
-    x_right: float,
-    poster: "Image.Image",
-    strip_starts: List[int],
-    strip_height: int,
-    reader,                         # easyocr.Reader or None
-    category_map: Optional[Dict[int, str]],
-    header_y_fraction: float,
-    upscale: int,
-    min_confidence: float,
-    tiles_dir: Optional[Path],
-    api_url: str = "",
-    api_token: str = "",
-) -> Tuple[str, List[WordEntry]]:
-    W, H = poster.size
-    xl = int(x_left)
-    xr = int(min(x_right, W))
-
-    cat_name = (category_map.get(block_idx) if category_map else None)
-    cat_detected = cat_name is not None
-    word_entries: List[WordEntry] = []
-
-    for s_idx, y_start in enumerate(strip_starts, start=1):
-        y_end = min(y_start + strip_height, H)
-        tile = poster.crop((xl, y_start, xr, y_end))
-        tile_h = tile.height
-
-        if tiles_dir is not None:
-            tiles_dir.mkdir(parents=True, exist_ok=True)
-            tile.save(
-                tiles_dir / f"block{block_idx:03d}_strip{s_idx:02d}.png"
-            )
-
-        tokens = ocr_tile(tile, reader, upscale=upscale,
-                          min_confidence=min_confidence,
-                          api_url=api_url, api_token=api_token)
-
-        # Header zone: top fraction of strip 1 only
-        header_y_max = tile_h * header_y_fraction if s_idx == 1 else 0.0
-
-        for text, conf, x_c, y_c in tokens:
-            if s_idx == 1 and y_c < header_y_max:
-                if not cat_detected and normalise(text) in VALID_LIWC_CATEGORIES:
-                    cat_name = normalise(text)
-                    cat_detected = True
-                continue
-            if is_valid_word(text):
-                word_entries.append(WordEntry(
-                    word=text,
-                    category=cat_name or f"block_{block_idx}",
-                    block_index=block_idx,
-                    strip_index=s_idx,
-                    confidence=conf,
-                ))
-
-    if cat_name is None:
-        cat_name = f"block_{block_idx}"
-
-    for e in word_entries:
-        e.category = cat_name
-
-    return cat_name, word_entries
 
 
 def deduplicate(entries: List[WordEntry]) -> List[WordEntry]:
@@ -838,6 +810,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               f"w={xr-xl:.0f}px")
 
         cat_name = (category_map.get(b_idx) if category_map else None) or f"block_{b_idx}"
+        cat_detected = category_map is not None and b_idx in (category_map or {})
         block_entries: List[WordEntry] = []
 
         for s_idx, y_start in enumerate(strip_starts, start=1):
@@ -866,14 +839,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                               debug_label=debug_label)
 
             header_y_max = tile_h * args.header_y_fraction if s_idx == 1 else 0.0
-            tile_entries: List[WordEntry] = []
 
-            for text, conf, x_c, y_c in tokens:
-                if s_idx == 1 and y_c < header_y_max:
-                    if (cat_name.startswith("block_") and
-                            normalise(text) in VALID_LIWC_CATEGORIES):
-                        cat_name = normalise(text)
-                    continue
+            # Strip 1: first token is the category name — skip it,
+            # collect everything else. All other strips: collect all tokens.
+            tile_entries: List[WordEntry] = []
+            for t_idx, (text, conf, x_c, y_c) in enumerate(tokens):
+                if s_idx == 1 and t_idx == 0:
+                    # First token of strip 1 = category name
+                    norm_text = normalise(text)
+                    if norm_text in VALID_LIWC_CATEGORIES:
+                        cat_name = norm_text
+                        cat_detected = True
+                        print(f"    [b{b_idx:03d}] category: {cat_name!r}")
+                    continue   # skip this token regardless
                 if is_valid_word(text):
                     tile_entries.append(WordEntry(
                         word=text,
@@ -883,17 +861,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         confidence=conf,
                     ))
 
-            # Write checkpoint immediately after each tile
-            write_checkpoint(
-                checkpoint_dir=checkpoint_dir,
-                block_idx=b_idx,
-                strip_idx=s_idx,
-                cat_name=cat_name,
-                entries=tile_entries,
-                incremental_csv=incremental_csv,
-            )
-            print(f"    strip {s_idx}  -> {len(tile_entries)} words  "
-                  f"[checkpoint saved]")
+            # Only save checkpoint if we got actual words (or it's a
+            # genuinely empty tile — detected by tokens being non-empty).
+            # If tokens is empty it means the API failed; don't mark as done
+            # so --resume will retry this tile.
+            if tokens:
+                write_checkpoint(
+                    checkpoint_dir=checkpoint_dir,
+                    block_idx=b_idx,
+                    strip_idx=s_idx,
+                    cat_name=cat_name,
+                    entries=tile_entries,
+                    incremental_csv=incremental_csv,
+                )
+                print(f"    strip {s_idx}  -> {len(tile_entries)} words  "
+                      f"[checkpoint saved]")
+            else:
+                print(f"    strip {s_idx}  -> API failed, NOT checkpointed "
+                      f"(will retry with --resume)")
             block_entries.extend(tile_entries)
 
         # Update category on all entries for this block (may have been
